@@ -1,0 +1,81 @@
+name: On-Demand Ticker Gamma Exposure
+
+# Manual-only: no schedule. Go to the Actions tab, click "Run workflow",
+# type a ticker symbol (e.g. AAPL, QQQ, TSLA), and this computes a fresh
+# gamma exposure dashboard for that ticker and publishes it to GitHub Pages.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticker:
+        description: "Ticker symbol to analyze (e.g. AAPL, QQQ, TSLA)"
+        required: true
+        default: "SPY"
+
+concurrency:
+  group: gex-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.commit.outputs.updated }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run gamma exposure computation
+        env:
+          TICKER: ${{ github.event.inputs.ticker }}
+        run: python3 scripts/compute_gex.py
+
+      - name: Commit updated data file
+        id: commit
+        run: |
+          git config user.name "gex-bot"
+          git config user.email "gex-bot@users.noreply.github.com"
+          git add site/data/gex_data.json
+          if git diff --cached --quiet; then
+            echo "No data changes — skipping commit."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "On-demand GEX update: ${{ github.event.inputs.ticker }} ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-pages:
+    needs: update-data
+    if: needs.update-data.outputs.updated == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout repo (latest commit)
+        uses: actions/checkout@v4
+
+      - name: Upload site as Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
