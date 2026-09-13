@@ -70,6 +70,8 @@ jobs:
     steps:
       - name: Checkout repo (latest commit)
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Upload site as Pages artifact
         uses: actions/upload-pages-artifact@v3
